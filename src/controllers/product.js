@@ -1,71 +1,135 @@
-import { uploadOnCloudinary } from '../utils/cloundinary.js';
-import { v2 as cloudinary } from 'cloudinary';
-import {Product} from "../models/Product.js";
-import {ApiResponse} from "../utils/ApiResponse.js"
-import {ApiError} from "../utils/ApiError.js"
+import { uploadOnCloudinary } from "../utils/cloundinary.js";
+import { v2 as cloudinary } from "cloudinary";
+import { Product } from "../models/Product.js";
 
 const registerProduct = async (req, res) => {
   try {
-      const { collageName, city, name, price, discription } = req.body;
-      const avatarUrls = [];
-      const avatars = req.files['avatar'];
+    const { name, price, description, contactDetails, Address } = req.body;
+    const avatarUrls = [];
+    const avatars = req.files["avatar"];
 
-      for (const avatar of avatars) {
-          const url = await uploadOnCloudinary(avatar.path);
-          if (url) {
-              avatarUrls.push(url);
-          }
+    for (const avatar of avatars) {
+      const url = await uploadOnCloudinary(avatar.path);
+      if (url) {
+        avatarUrls.push(url);
       }
+    }
 
-      const existingProduct = await Product.findOne({ collageName, city });
+    const { collageName, city, category } = req.body;
 
-      if (existingProduct) {
-          existingProduct.category.push(req.body.category);
-          await existingProduct.save();
-          console.log("Category appended to existing product:", existingProduct);
-          return new ApiResponse(200, "Category appended to existing product");
-      } else {
-          const product = new Product({ collageName, city, name, price, discription, avatar: avatarUrls, category: [req.body.category] });
-          await product.save();
-          console.log("New product registered:", product);
-          return new ApiResponse(200, "Product registered successfully");
-      }
+    // Extract user ID from JWT token
+    const userId = req.user.id;
+
+    const existingProduct = await Product.findOne({ collageName, city });
+
+    if (existingProduct) {
+      existingProduct.sellers.push({
+        name,
+        price,
+        description,
+        avatar: avatarUrls,
+        category,
+        contactDetails,
+        Address,
+        user: userId,
+      });
+      await existingProduct.save();
+      res.status(200).json({ message: "Product added to existing seller" });
+    } else {
+      const product = new Product({
+        collageName,
+        city,
+        sellers: [
+          {
+            name,
+            price,
+            description,
+            avatar: avatarUrls,
+            category,
+            contactDetails,
+            Address,
+            user: userId,
+          },
+        ],
+      });
+      await product.save();
+      res.status(200).json({ message: "New product registered" });
+    }
   } catch (error) {
-      console.error("Error registering Product:", error);
-      throw new ApiError(500, "Something went wrong while registering the product");
+    console.error("Error registering Product:", error);
+    res
+      .status(500)
+      .json({ error: "Something went wrong while registering the product" });
   }
 };
 
-  const deleteProduct = async (req, res) => {
-    const { id } = req.params;
-  
-    try {
-      const product = await Product.findById(id);
-  
 
-      if (!product) {
-        return res.status(404).json({ message: 'Product not found' });
-      }
-  
+const updateProductById = async (req, res) => {
+  const { id } = req.params;
+  const { name, price, description, contactDetails, Address, category } =
+    req.body;
+  const avatarUrls = [];
+  const avatars = req.files["avatar"];
 
-      // product.avatar.forEach(filePath => {
-      //   fs.unlinkSync(filePath);
-      // });
-
-      product.avatar.forEach(async imageUrl => {
-        const publicId = imageUrl.split('/').pop().split('.')[0]; 
-        await cloudinary.uploader.destroy(publicId);
-      });
-
-      await Product.findByIdAndDelete(id);
-  
-      res.status(200).json({ message: 'Product deleted successfully' });
-    } catch (error) {
-      console.error('Error deleting product:', error);
-      res.status(500).json({ message: 'Internal server error' });
+  // Upload avatars to Cloudinary and store URLs
+  for (const avatar of avatars) {
+    const url = await uploadOnCloudinary(avatar.path);
+    if (url) {
+      avatarUrls.push(url);
     }
-  };
-  
-  export { deleteProduct };
+  }
 
-export {registerProduct}
+  try {
+    const product = await Product.findById(id);
+
+    if (!product) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    product.name = name;
+    product.price = price;
+    product.description = description;
+    product.contactDetails = contactDetails;
+    product.Address = Address;
+    product.category = category;
+    product.avatar = avatarUrls;
+
+    await product.save();
+
+    res
+      .status(200)
+      .json({
+        message: "Product updated successfully",
+        updatedProduct: product,
+      });
+  } catch (error) {
+    console.error("Error updating product:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+const deleteProduct = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const product = await Product.findById(id);
+
+    if (!product) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    product.avatar.forEach(async (imageUrl) => {
+      const publicId = imageUrl.split("/").pop().split(".")[0];
+      await cloudinary.uploader.destroy(publicId);
+    });
+
+    await Product.findByIdAndDelete(id);
+
+    res.status(200).json({ message: "Product deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting product:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export { registerProduct, updateProductById, deleteProduct };
